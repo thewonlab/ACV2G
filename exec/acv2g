@@ -1,0 +1,4 @@
+#!/usr/bin/env Rscript
+
+status <- ACV2G::acv2g_cli(commandArgs(trailingOnly = TRUE))
+quit(save = "no", status = status, runLast = FALSE)

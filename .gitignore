@@ -1,0 +1,33 @@
+# Local R sessions and credentials
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+.Renviron
+.Rprofile
+.env
+.env.*
+.DS_Store
+
+# Installed libraries, environments, and analysis artifacts
+.Rlib/
+.pythonlib/
+.venv*/
+renv/library/
+analyses/
+results/
+acv2g-example-result*/
+cli-example-result*/
+acv2g-example-locus-z.pdf
+cli-example-locus-z.pdf
+called-pairs.csv
+*.Rcheck/
+*.tar.gz
+*.log
+*.o
+*.so
+*.dll
+*.dylib
+
+# Internal provenance stays local pending the public-release review
+dev/LEGACY_PROVENANCE.md

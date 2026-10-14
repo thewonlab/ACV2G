@@ -1,0 +1,9 @@
+^\.Rproj\.user$
+^.*\.Rproj$
+^\.git$
+^\.github$
+^dev$
+^LICENSE\.notes$
+^\.gitignore$
+^docs$
+^INSTALL\.md$

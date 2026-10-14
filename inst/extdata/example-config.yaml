@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+analysis_build: hg38
+
+inputs:
+  loci:
+    path: loci.tsv
+    format: tsv
+    assembly: hg38
+  variants:
+    path: variants.tsv
+    format: tsv
+    assembly: hg38
+  genes:
+    path: genes.tsv
+    format: tsv
+    assembly: hg38
+    id_version_policy: preserve
+  chrom_sizes:
+    path: chrom_sizes.tsv
+    assembly: hg38
+
+profiles:
+  example_profile:
+    activity:
+      path: activity.tsv
+      type: table
+      table_mode: variant
+      value_col: activity_raw
+      units: arbitrary_units
+      assembly: hg38
+    contact:
+      path: contacts.tsv
+      type: table
+      table_representation: complete
+      layers:
+        balanced: balanced
+        raw: raw
+      units: arbitrary_units
+      assembly: hg38
+
+method:
+  name: locus_pair_z
+  gene_flank_bp: 1000000
+  activity_transform: log1p
+  contact_transform: log1p
+  max_missing_fraction: 0.20
+  call_rule: none
+
+activity:
+  activity_window_bp: 500
+  aggregation: window_mean
+
+contact:
+  contact_value: balanced
+  diagonal_policy: neighbor_max
+  distance_policy: none
+
+liftover:
+  structural_failure_policy: error
+  reciprocal_liftover_policy: none

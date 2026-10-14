@@ -1,0 +1,51 @@
+Package: ACV2G
+Title: Activity–Contact Variant-to-Gene Prioritization
+Version: 0.0.0.9000
+Authors@R: c(
+    person("ACV2G", "Development Team", role = c("aut", "cre"),
+           email = "acv2g.dev@localhost")
+  )
+Description: Prioritizes variant-gene pairs by combining local regulatory
+    activity with three-dimensional chromatin contact. The default method
+    standardizes pair-level activity-contact proxy values within fixed,
+    user-supplied loci. An independent optional method standardizes each
+    gene's proxy values over an explicitly declared reference variant
+    universe. The package retains missing evidence and quality-control
+    provenance and exposes the same computation through an R API and a
+    command-line interface.
+License: file LICENSE
+URL: https://github.com/thewonlab/ACV2G
+BugReports: https://github.com/thewonlab/ACV2G/issues
+Encoding: UTF-8
+Depends:
+    R (>= 4.4.0)
+Imports:
+    cli,
+    data.table,
+    digest,
+    GenomeInfoDb,
+    GenomicAlignments,
+    GenomicRanges,
+    ggplot2,
+    HiCExperiment,
+    IRanges,
+    jsonlite,
+    optparse,
+    Rsamtools,
+    rtracklayer,
+    S4Vectors,
+    strawr,
+    svglite,
+    stats,
+    utils,
+    VariantAnnotation,
+    yaml
+Suggests:
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    withr
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2

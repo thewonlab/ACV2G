@@ -1,0 +1,476 @@
+---
+title: "ACV2G workflow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ACV2G workflow}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Development status and scientific scope
+
+ACV2G is currently available only for authorized private/local development,
+group testing, and evaluation. This vignette documents the implemented
+development API; it is not a public-release notice or an open-source license.
+
+ACV2G prioritizes variant–gene pairs by multiplying variant-centred regulatory
+activity by variant-to-TSS chromatin contact. It is ABC-inspired, but it does
+not reproduce the canonical enhancer-centric ABC score. The default estimand
+is a pair-level Z-score within a fixed user-supplied locus.
+
+For variant anchor \(v\) and gene \(g\), ACV2G first computes
+
+\[
+P(v,g)=T_A(A_v)T_C(C_{v,g}).
+\]
+
+`activity_transform` and `contact_transform` independently default to
+`log1p`; `identity` is the only alternative. A finite negative input is invalid
+under its selected `log1p` transform.
+
+The default `locus_pair_z` is
+
+\[
+Z(v,g\mid l)=\frac{P(v,g)-\bar P_l}{s_l},
+\]
+
+where the mean and sample standard deviation use finite proxies in the
+original fixed locus \(l\). At least two finite, non-constant values are
+required. Candidate-gene search flanks never change the normalization locus.
+
+## Executable installed smoke example
+
+This compact chunk is evaluated when the vignette is built, so the documented
+installed-extdata workflow is continuously exercised.
+
+```{r installed-smoke, eval=TRUE}
+library(ACV2G)
+
+example_config <- system.file(
+  "extdata", "example-config.yaml",
+  package = "ACV2G", mustWork = TRUE
+)
+example_result <- predict_v2g(example_config)
+example_pairs <- v2g_table(example_result, "pairs")
+stopifnot(nrow(example_pairs) > 0L)
+example_pairs[c("locus_id", "variant_id", "gene_id", "locus_pair_z")]
+```
+
+## Prepare the locus-centric inputs
+
+The smallest conceptual input set is:
+
+1. user-defined fixed locus boundaries;
+2. target variant chromosome plus 1-based position;
+3. explicit protein-coding gene/TSS annotation;
+4. one activity source and one contact source per named profile; and
+5. explicit assembly labels for every genomic source.
+
+A locus TSV uses 0-based half-open boundaries:
+
+```text
+locus_id  chrom  start0  end0
+locus_1   chr1   100000  120000
+```
+
+A minimal variant TSV uses 1-based anchors:
+
+```text
+variant_id  chrom  pos1
+variant_A   chr1   100001
+variant_B   chr1   105001
+```
+
+A minimal gene–TSS table is:
+
+```text
+gene_id  chrom  tss_pos1  strand  gene_biotype
+GENE1    chr1   130001    +       protein_coding
+```
+
+Only target variants inside the original locus are eligible. Candidate
+protein-coding genes have at least one eligible TSS within the locus ±
+`gene_flank_bp`, 1 Mb by default; that TSS may lie outside the locus. ACV2G
+constructs the complete eligible variant–gene pair universe before contact
+lookup.
+
+Gene-level biotype is authoritative. Transcript classification is a fallback
+only when gene-level classification is absent, and an explicit gene-level
+non-protein-coding label is not overridden. If neither level can classify a
+gene, supply `protein_coding_gene_ids` or an explicit `is_protein_coding`
+field. ACV2G does not guess biotype from an ID prefix or symbol.
+
+## Configure a same-build default run
+
+Relative paths are resolved relative to the YAML file itself.
+
+```yaml
+schema_version: "1.0.0"
+analysis_build: GRCh38
+
+inputs:
+  loci:
+    path: loci.tsv
+    format: tsv
+    assembly: GRCh38
+  variants:
+    path: variants.tsv
+    format: tsv
+    assembly: GRCh38
+  genes:
+    path: genes.gtf.gz
+    format: gtf
+    assembly: GRCh38
+    id_version_policy: preserve
+  chrom_sizes:
+    path: GRCh38.chrom.sizes
+    assembly: GRCh38
+
+profiles:
+  neuron:
+    activity:
+      path: neuron.bigWig
+      type: bigwig
+      assembly: GRCh38
+      units: signal
+    contact:
+      path: neuron.mcool
+      type: mcool
+      assembly: GRCh38
+
+method:
+  name: locus_pair_z
+  gene_flank_bp: 1000000
+  activity_transform: log1p
+  contact_transform: log1p
+  max_missing_fraction: 0.20
+  call_rule: none
+
+activity:
+  activity_window_bp: 500
+  aggregation: window_mean
+  bam_mapq_min: 30
+
+contact:
+  contact_value: balanced
+  contact_resolution_bp: 10000
+  diagonal_policy: neighbor_max
+  distance_policy: none
+
+liftover:
+  structural_failure_policy: error
+  reciprocal_liftover_policy: none
+```
+
+Unknown keys fail validation. `proxy_transform` remains a backward-compatible
+shorthand only when neither independent transform is supplied; new
+configurations should use the two explicit fields above.
+
+One profile is exactly one activity source plus one contact source. Named
+profiles are processed independently; ACV2G does not infer replicates, average
+profiles, or build an activity-by-contact cross-product.
+
+## Declare quantitative tables completely
+
+Activity tables can represent variant anchors (`chrom`, `pos1`) or intervals
+(`chrom`, `start0`, `end0`) and must map a numeric value column:
+
+```yaml
+profiles:
+  neuron:
+    activity:
+      path: activity.tsv
+      type: table
+      table_mode: variant
+      value_col: activity_raw
+      assembly: GRCh38
+    contact:
+      path: contacts.tsv
+      type: table
+      table_representation: complete
+      assembly: GRCh38
+      layers:
+        balanced: KR
+        raw: count
+```
+
+A contact table requires
+`chrom1,start1_0,end1_0,chrom2,start2_0,end2_0` and explicitly mapped numeric
+scores. `table_representation: complete` is mandatory for tabular contact
+input; sparse called-loop lists are not supported as the sole source. Use
+either `layers` or one `score_col` plus an explicit `score_type` of
+`balanced`, `raw`, or `named_score`. ACV2G never infers score semantics from a
+column name.
+
+Table/bedGraph activity requires chromosome lengths in the activity source's
+assembly. `inputs.chrom_sizes` must explicitly match `analysis_build`. For a
+cross-build activity source, put an assembly-matched chromosome-size
+specification under the profile:
+
+```yaml
+profiles:
+  neuron:
+    activity:
+      path: neuron.GRCh37.bedGraph
+      type: bedgraph
+      assembly: GRCh37
+      chrom_sizes:
+        path: GRCh37.chrom.sizes
+        assembly: GRCh37
+      chain: GRCh38-to-GRCh37.chain.gz
+```
+
+## Validate and run through R
+
+```r
+library(ACV2G)
+
+config <- read_v2g_config("analysis.yaml")
+config <- validate_v2g_config(config)
+result <- predict_v2g(config)
+
+pairs <- v2g_table(result, "pairs")
+qc <- v2g_table(result, "normalization_qc")
+warnings <- v2g_table(result, "warnings")
+
+write_v2g_result(result, "results/neuron")
+audit_v2g_result("results/neuron")
+```
+
+The installed small example uses complete activity/contact tables:
+
+```r
+example_config <- system.file(
+  "extdata", "example-config.yaml", package = "ACV2G",
+  mustWork = TRUE
+)
+example_result <- predict_v2g(example_config)
+summarize_v2g_result(example_result)
+```
+
+## Invoke the same engine through the CLI
+
+The CLI emits machine-readable JSON. Validation/input failures return exit
+code 2; unexpected software failures return exit code 1.
+
+R package installation does not automatically put the bundled launcher on
+`PATH`. This cross-platform form always invokes the installed R engine:
+
+```bash
+Rscript -e 'quit(save="no", status=ACV2G::acv2g_cli(commandArgs(trailingOnly=TRUE)), runLast=FALSE)' methods
+```
+
+On Windows `cmd.exe`, use double quotes around the expression. The launcher can
+also be located with
+`system.file("exec", "acv2g", package = "ACV2G")` on Unix/macOS or
+`system.file("exec", "acv2g.cmd", package = "ACV2G")` on Windows. Users may
+create their own `acv2g` wrapper on `PATH`; examples below use that name only
+as shorthand.
+
+```bash
+acv2g methods
+acv2g validate --config analysis.yaml
+acv2g predict --config analysis.yaml --output results/neuron
+acv2g summarize --result results/neuron
+acv2g plot-locus-z \
+  --result results/neuron \
+  --output results/neuron-locus-z.svg
+```
+
+Derived plots should remain outside the checksummed result-bundle directory;
+adding an unmanifested payload inside that directory intentionally causes
+`audit_v2g_result()` to fail its exact-integrity check.
+
+Prediction never downloads annotation. An exact pinned managed reference must
+be fetched explicitly with `acv2g reference fetch` before prediction.
+
+## Cross-build directions and coordinate mappings
+
+`analysis_build` is the contact build; contact matrices are never lifted.
+Structural coordinate sources and activity queries use deliberately different
+chain directions:
+
+- a cross-build locus, variant, gene, or background-variant `chain` maps
+  **its input assembly → analysis_build**;
+- a native activity file stays in its own assembly, so its `chain` maps query
+  anchors **analysis_build → activity assembly**; and
+- when `reciprocal_liftover_policy: require`, `reverse_chain` must map the
+  exact reverse direction. The default `none` makes no round-trip claim.
+
+Structural one-to-many/split mappings are not selected or merged
+heuristically. `structural_failure_policy: error` stops the run; explicit
+`fail_locus` allows only safely unaffected loci and marks the run partial.
+Activity-query mapping failure preserves the fixed pair and returns missing
+activity with warning/QC.
+
+Coordinate-bearing optional mappings must declare their own coordinate build:
+
+```yaml
+inputs:
+  variant_locus_map:
+    path: variant-locus-map.tsv
+    assembly: GRCh37       # matches the source variants
+  reference_gene_variant_map:
+    path: gene-variant-map.tsv
+    assembly: GRCh38       # matches analysis_build
+```
+
+The declaration may instead be an `assembly` column in the mapping table, but
+the two declarations must agree when both exist. ID-only mappings without
+`chrom` + `pos1` do not need a coordinate assembly.
+
+## Use the independent `gene_wise_z`
+
+`gene_wise_z` is separate from the default method and always requires an
+explicit reference source.
+
+To use the complete current input variant set:
+
+```yaml
+method:
+  name: gene_wise_z
+  reference_mode: input_variants
+  reference_gene_radius_bp: 1000000
+  activity_transform: log1p
+  contact_transform: log1p
+  max_missing_fraction: 0.20
+  call_rule: none
+```
+
+To use a separate background set:
+
+```yaml
+inputs:
+  background_variants:
+    path: background-variants.tsv
+    assembly: GRCh38
+
+method:
+  name: gene_wise_z
+  reference_mode: background_variants
+  reference_gene_radius_bp: 1000000
+```
+
+Within the declared source set, each gene defaults to variants within at least
+one eligible TSS ± `reference_gene_radius_bp`. To replace that rule completely,
+supply:
+
+```yaml
+inputs:
+  reference_gene_variant_map:
+    path: reference-gene-variant-map.tsv
+    assembly: GRCh38
+```
+
+The mapping is a complete override, not an addition. Reference mode, universe
+rule, radius, counts, set identity, and mapping identity remain in output
+provenance. The dedicated CLI command rejects a configuration whose
+`method.name` is not `gene_wise_z`:
+
+```bash
+acv2g gene-wise-z --config gene-wise.yaml --output results/gene-wise
+```
+
+## Interpret contact, zero, and missing values
+
+Balanced contact is requested by default. If no balanced layer exists, ACV2G
+warns and uses the unique raw layer while recording requested/resolved layers
+and fallback status. If raw is absent or ambiguous, it errors and lists
+available layers. Missing explicitly named layers and ambiguous balanced
+layers fail without fallback.
+
+Native `.hic` is queried directly in bounded tiles with `strawr`. After a
+successful raw (`NONE`) query, an omitted valid pixel is a sparse structural
+zero. After a balanced query, however, an omitted or `NA` pixel remains
+`missing_balance_weight`: per-bin normalization weights are not available from
+this reader, so ACV2G does not guess that the normalized value is zero. Query
+failures remain missing for both raw and balanced layers.
+
+Only `distance_policy: none` is implemented. Same-bin contact defaults to
+immediate-neighbor maximum replacement, with `observed` and `keep_na`
+alternatives. TSS-bin evidence is aggregated to a pair only by finite maximum.
+
+A true observed contact zero remains zero. Missing activity, chromosomes,
+balancing weights, pixels, or query mappings remain `NA` with machine-readable
+status; they are never silently changed to zero.
+
+Z statistics ignore non-finite proxies. A group needs at least two finite,
+non-constant proxies. A missing fraction strictly greater than
+`method.max_missing_fraction` (20% by default) produces a structured warning
+and `high_missing_fraction` QC, but valid scores are still returned when the
+group is otherwise normalizable.
+
+## Calling and plotting
+
+Continuous scores are primary. `call_rule: none` is the overall default. The
+only optional rule, `z_threshold`, calls `z >= 1.5` unless
+`method.z_threshold` is supplied. It is a prioritization rule, not a p-value or
+FDR procedure.
+
+`plot_locus_z()` accepts only `locus_pair_z` and never pools profiles. Exactly
+one profile is selected automatically; a multi-profile result requires
+`profile_id` in R or `--profile` in the CLI.
+
+```r
+p <- plot_locus_z(example_result, profile_id = "example_profile")
+save_locus_z_plot(p, "locus-z.pdf")
+
+p_sample <- plot_locus_z(
+  example_result,
+  profile_id = "example_profile",
+  point_mode = "sample",
+  max_points_per_locus = 2000,
+  seed = 1
+)
+```
+
+All finite points are shown by default; deterministic `sample` and `none`
+modes are explicit. A stored `z_threshold` result automatically shows its
+resolved dashed threshold and highlights actual `link_call` values. A
+`call_rule: none` result has no implicit threshold or red calls. An explicit
+`display_threshold` changes only the labelled visual reference line and never
+changes stored calls. The default title is blank.
+
+```bash
+acv2g plot-locus-z \
+  --result results/all-profiles \
+  --profile neuron \
+  --point-mode sample \
+  --max-points 2000 \
+  --seed 1 \
+  --output neuron-locus-z.pdf
+```
+
+Plot captions and provenance record missing/non-finite pairs,
+non-normalizable pairs/loci, sampling, ordering, package version, and
+source-result hash. The CLI also accepts `--width` and `--height` in inches for
+the saved PDF, PNG, or SVG.
+
+## Audit the result bundle
+
+The complete eligible pair table is always retained. Additional tables
+preserve TSS-bin contact detail, submitted-record-to-anchor mapping,
+variant–locus assignment QC, locus status, normalization statistics, evidence
+QC, annotation decisions, liftover attempts, and structured warnings. The
+manifest records resolved parameters, local input hashes, software versions,
+and table schemas; SHA-256 checksums detect later payload changes.
+
+```r
+lazy <- read_v2g_result("results/neuron", lazy = TRUE)
+v2g_table(lazy, "pairs")
+audit_v2g_result(lazy)
+```
+
+## What remains future work
+
+The current snapshot passes its local package check and automated suite. Group
+testing, cross-platform checks, further performance profiling, API/CLI
+refinement, and biological benchmarking remain in the private development
+cycle. A later release-readiness review—not this vignette—will decide copyright and
+contributor authorization, a public license, repository/archive channels,
+Bioconda/BioContainer, tagged releases, public CI, and maintenance. MIT,
+Bioconductor, Bioconda, and BioContainer are provisional candidates only.

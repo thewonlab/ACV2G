@@ -1,0 +1,2 @@
+gene_id	chrom	tss_pos1	strand	gene_biotype	gene_symbol
+ENSG_TEST001	chr1	130001	+	protein_coding	TEST1
