@@ -10,12 +10,7 @@ returns scored variant–gene pairs, quality-control tables, and analysis proven
 
 The same analysis is available as an **R package** and a **command-line
 interface (CLI)**. RStudio, R scripts, and cluster jobs can use the same
-configuration. Longleaf, Slurm, Python, and lab-specific directories are not
-required by the package.
-
-> **Private development version for authorized collaborators.** This is not
-> yet a public release. The existing [development notice](LICENSE) applies;
-> a final open-source license has not been selected.
+configuration.
 
 ## Start here
 
@@ -28,7 +23,7 @@ required by the package.
 
 ## Installation
 
-You need **R 4.4.0 or newer** and access to this private repository.
+You need **R 4.4.0 or newer**.
 The first installation also installs CRAN and Bioconductor dependencies;
 it can take considerably longer than running the small example.
 
